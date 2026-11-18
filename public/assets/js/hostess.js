@@ -853,7 +853,15 @@ var HostessApp = (function () {
                 xetuxOrdenActiva = result.data.xetux_orden || null;
                 aplicarEstadoXetux();
                 console.info('Xetux order/info', result.data.order_info);
-                alert('Totales obtenidos de Xetux. El envío al destino final se configurará en el siguiente paso.');
+                var r = result.data.resumen || {};
+                var fmt = function (v) { return v == null ? '—' : Number(v).toFixed(2); };
+                var totales = '\nTotal: ' + fmt(r.total) + '\nPagado: ' + fmt(r.pagado) + '\nPendiente: ' + fmt(r.pendiente);
+                if (result.data.cerrada) {
+                    alert('La cuenta está ' + (result.data.estado_pos || 'cerrada').toLowerCase() + ' en el POS.' + totales);
+                } else {
+                    alert('La cuenta sigue abierta en el POS (' + (result.data.estado_pos || 'sin estado') + '). '
+                        + 'Ciérrala en Xetux y vuelve a consultar.' + totales);
+                }
                 cargarActividad(reservaSeleccionada.codigo);
             })
             .catch(function () {

@@ -38,11 +38,57 @@ class XetuxApiService
             return [];
         }
 
+        // Respuesta: data.waiters[] = {id, firstName, lastName, spaces, numberOfDiners}
         return $this->normalizarListaId($datos, static function (array $fila): string {
-            $nombre = trim((string) ($fila['name'] ?? $fila['nombre'] ?? $fila['waiterName'] ?? ''));
+            $nombre = trim(
+                trim((string) ($fila['firstName'] ?? '')) . ' ' . trim((string) ($fila['lastName'] ?? ''))
+            );
+            if ($nombre === '') {
+                $nombre = trim((string) ($fila['name'] ?? $fila['nombre'] ?? ''));
+            }
+            if ($nombre === '') {
+                $nombre = 'Mesero #' . ($fila['id'] ?? '');
+            }
 
-            return $nombre !== '' ? $nombre : ('Mesero #' . ($fila['id'] ?? ''));
+            if (isset($fila['spaces']) && is_numeric($fila['spaces'])) {
+                $mesas = (int) $fila['spaces'];
+                $pax   = (int) ($fila['numberOfDiners'] ?? 0);
+                $nombre .= ' (' . $mesas . ' ' . ($mesas === 1 ? 'mesa' : 'mesas') . ' · ' . $pax . ' pax)';
+            }
+
+            return $nombre;
         });
+    }
+
+    /**
+     * Formas de pago del POS (GET order/availablePayforms).
+     *
+     * @return list<array{id: int, label: string}>
+     */
+    public function formasPagoDisponibles(int $sucursalId): array
+    {
+        $datos = $this->getJson($sucursalId, '/xspos/api/integration/order/availablePayforms');
+        if ($datos === null) {
+            return [];
+        }
+
+        return $this->normalizarListaId($datos, static function (array $fila): string {
+            return trim((string) (
+                $fila['name'] ?? $fila['payformName'] ?? $fila['description'] ?? $fila['descripcion'] ?? ''
+            ));
+        });
+    }
+
+    /** Nombre de una forma de pago por ID; null si no se pudo consultar o no existe. */
+    public function nombreFormaPago(int $sucursalId, int $payformId): ?string
+    {
+        foreach ($this->formasPagoDisponibles($sucursalId) as $forma) {
+            if ($forma['id'] === $payformId && $forma['label'] !== '') {
+                return $forma['label'];
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -273,7 +319,23 @@ class XetuxApiService
     private function extraerFilas(array $decoded): array
     {
         if (isset($decoded['data']) && is_array($decoded['data'])) {
-            return array_values($decoded['data']);
+            $data = $decoded['data'];
+            if ($this->esLista($data)) {
+                return array_values($data);
+            }
+            // Xetux envuelve las listas: data.waiters[], data.spaces[], data.suborders[], data.payforms[]…
+            foreach (['waiters', 'spaces', 'payforms', 'suborders', 'items'] as $clave) {
+                if (isset($data[$clave]) && is_array($data[$clave])) {
+                    return array_values($data[$clave]);
+                }
+            }
+            foreach ($data as $valor) {
+                if (is_array($valor) && $this->esLista($valor)) {
+                    return array_values($valor);
+                }
+            }
+
+            return [];
         }
         if (isset($decoded['items']) && is_array($decoded['items'])) {
             return array_values($decoded['items']);
@@ -316,7 +378,7 @@ class XetuxApiService
      */
     private function extraerId(array $fila): ?int
     {
-        foreach (['id', 'Id', 'ID', 'waiterId', 'spaceId', 'userId'] as $clave) {
+        foreach (['id', 'Id', 'ID', 'waiterId', 'spaceId', 'payformId', 'userId'] as $clave) {
             if (isset($fila[$clave]) && is_numeric($fila[$clave])) {
                 return (int) $fila[$clave];
             }

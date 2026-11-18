@@ -805,12 +805,16 @@ class ReservasController extends BaseController
             'spaceId'          => $spaceId,
             'openOrderUserId'  => $waiterId,
             'client'           => [
+                'document'  => $codigo,
                 'firstName' => $firstName,
                 'lastName'  => $lastName,
-                'email'     => $codigo,
                 'phone'     => (string) ($reserva['telefono'] ?? ''),
             ],
         ];
+        $emailCliente = trim((string) ($reserva['email'] ?? ''));
+        if ($emailCliente !== '' && filter_var($emailCliente, FILTER_VALIDATE_EMAIL) !== false) {
+            $payloadCreate['client']['email'] = $emailCliente;
+        }
 
         $respCreate = $xetux->crearOrden($sucursalId, $payloadCreate);
         if ($respCreate === null) {
@@ -857,17 +861,27 @@ class ReservasController extends BaseController
                 $pagoError = 'Hay prepago pero la sucursal no tiene payform ID configurado.';
             } else {
                 $refStripe = trim((string) ($json['stripe_reference'] ?? $reserva['stripe_reference'] ?? $codigo));
+                $datosOrden = is_array($respCreate['data'] ?? null) ? $respCreate['data'] : $respCreate;
+                // total = total de la orden (0.00 recién creada), no el monto del prepago
+                $totalOrden = is_numeric($datosOrden['orderTotal'] ?? null) ? (float) $datosOrden['orderTotal'] : 0.0;
+                // Hora local del POS: la app corre en UTC, así que se toma la apertura que reporta Xetux
+                $fechaPago = trim((string) ($datosOrden['openingDatetime'] ?? ''));
+                if (preg_match('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/', $fechaPago) !== 1) {
+                    $fechaPago = date('Y-m-d\TH:i:s');
+                }
+                $nombreForma = $xetux->nombreFormaPago($sucursalId, (int) $cfg['payform_id']) ?? 'PREPAGO';
                 $payloadPago = [
                     'suborderId' => $suborderId,
                     'orderId'    => $orderId,
-                    'total'      => $prepago,
+                    'total'      => $totalOrden,
                     'payments'   => [[
                         'payformId'         => $cfg['payform_id'],
-                        'payformName'       => 'PREPAGO',
+                        'payformName'       => $nombreForma,
                         'referenceNumber'   => $refStripe,
                         'amount'            => $prepago,
                         'tip'               => 0,
-                        'paymentDatetime'   => date('c'),
+                        'prepaid'           => true,
+                        'paymentDatetime'   => $fechaPago,
                     ]],
                 ];
                 if ($xetux->agregarPago($sucursalId, $payloadPago) === null) {
@@ -991,18 +1005,37 @@ class ReservasController extends BaseController
             ]);
         }
 
-        model(ReservaXetuxOrdenModel::class)->update($orden['id'], ['estatus' => 'cerrada']);
+        // Xetux no tiene endpoint de cierre: la cuenta se cierra en el POS y aquí solo se refleja su estado.
+        $datosInfo   = is_array($info['data'] ?? null) ? $info['data'] : $info;
+        $estadoPos   = trim((string) ($datosInfo['suborderStatusDescription'] ?? $datosInfo['orderStatusDescription'] ?? ''));
+        $estadoLocal = match (mb_strtolower($estadoPos)) {
+            'cerrada'   => 'cerrada',
+            'cancelada' => 'cancelada',
+            default     => 'activa',
+        };
+
+        if ($estadoLocal !== 'activa') {
+            model(ReservaXetuxOrdenModel::class)->update($orden['id'], ['estatus' => $estadoLocal]);
+        }
 
         (new ReservaActividadService())->registrar(
             $codigo,
             'otro',
-            'consultó cierre de cuenta en Xetux (order/info)',
-            ['suborder_id' => $orden['suborder_id']],
+            'consultó la cuenta en Xetux: ' . ($estadoPos !== '' ? $estadoPos : 'estado desconocido'),
+            ['suborder_id' => $orden['suborder_id'], 'estado_pos' => $estadoPos],
             $sucursalId
         );
 
         return $this->response->setJSON([
             'success'     => true,
+            'estado_pos'  => $estadoPos,
+            'cerrada'     => $estadoLocal !== 'activa',
+            'resumen'     => [
+                'total'     => $datosInfo['suborderTotal'] ?? $datosInfo['orderTotal'] ?? null,
+                'pagado'    => $datosInfo['amountPaid'] ?? null,
+                'pendiente' => $datosInfo['amountRemaining'] ?? null,
+                'propina'   => $datosInfo['tipPaid'] ?? null,
+            ],
             'order_info'  => $info,
             'xetux_orden' => model(ReservaXetuxOrdenModel::class)->find($orden['id']),
         ]);
