@@ -79,6 +79,24 @@ class XetuxApiService
         });
     }
 
+    /**
+     * Subórdenes de una orden (GET order/suborders). null si Xetux no respondió.
+     *
+     * @return list<array<string, mixed>>|null
+     */
+    public function subordenes(int $sucursalId, int $orderId): ?array
+    {
+        $datos = $this->getJson(
+            $sucursalId,
+            '/xspos/api/integration/order/suborders?' . http_build_query(['orderId' => $orderId])
+        );
+        if ($datos === null) {
+            return null;
+        }
+
+        return array_values(array_filter($this->extraerFilas($datos), 'is_array'));
+    }
+
     /** Nombre de una forma de pago por ID; null si no se pudo consultar o no existe. */
     public function nombreFormaPago(int $sucursalId, int $payformId): ?string
     {

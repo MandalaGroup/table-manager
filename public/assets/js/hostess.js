@@ -857,7 +857,8 @@ var HostessApp = (function () {
                 var fmt = function (v) { return v == null ? '—' : Number(v).toFixed(2); };
                 var totales = '\nTotal: ' + fmt(r.total) + '\nPagado: ' + fmt(r.pagado) + '\nPendiente: ' + fmt(r.pendiente);
                 if (result.data.cerrada) {
-                    alert('La cuenta está ' + (result.data.estado_pos || 'cerrada').toLowerCase() + ' en el POS.' + totales);
+                    alert('La cuenta está ' + (result.data.estado_pos || 'cerrada').toLowerCase() + ' en el POS.' + totales
+                        + '\n\nLibera la mesa para enviar el consumo a la auditoría de One Reservations.');
                 } else {
                     alert('La cuenta sigue abierta en el POS (' + (result.data.estado_pos || 'sin estado') + '). '
                         + 'Ciérrala en Xetux y vuelve a consultar.' + totales);

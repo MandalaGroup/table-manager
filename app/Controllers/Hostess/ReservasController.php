@@ -554,6 +554,16 @@ class ReservasController extends BaseController
             ]);
         }
 
+        // Si se sentó en Xetux: la cuenta debe estar cerrada en el POS y su consumo llega a la auditoría de OR
+        $sucursalId = (int) (session()->get('sucursal_id') ?? $asignacion['sucursal_id'] ?? 0);
+        $consumo    = $this->enviarConsumoXetux($codigo, $sucursalId);
+        if ($consumo['error'] !== null) {
+            return $this->response->setStatusCode($consumo['status'])->setJSON([
+                'success' => false,
+                'error'   => $consumo['error'],
+            ]);
+        }
+
         $model->update($asignacion['id'], [
             'estado_mesa'  => 'liberada',
             'liberated_at' => date('Y-m-d H:i:s'),
@@ -563,13 +573,126 @@ class ReservasController extends BaseController
             $codigo,
             'liberar',
             'liberó la mesa de la reserva',
-            ['estado_mesa' => 'liberada']
+            ['estado_mesa' => 'liberada'],
+            $sucursalId
         );
 
         return $this->response->setJSON([
             'success'    => true,
             'asignacion' => $this->enriquecerAsignacion($model->find($asignacion['id'])),
+            'consumo'    => $consumo['enviado'],
         ]);
+    }
+
+    /**
+     * Estado de las subórdenes Xetux de una orden.
+     *
+     * @return array{error: ?string, abiertas: int, tickets: list<array{numero_ticket: string, cheque: string, monto: float}>, total: float}
+     */
+    private function estadoSubordenesXetux(int $sucursalId, array $orden): array
+    {
+        $xetux      = new XetuxApiService();
+        $subordenes = $xetux->subordenes($sucursalId, (int) $orden['order_id']);
+        if ($subordenes === null) {
+            return [
+                'error'    => 'No se pudo consultar la cuenta en Xetux: ' . ($xetux->obtenerUltimoError() ?? 'sin respuesta'),
+                'abiertas' => 0,
+                'tickets'  => [],
+                'total'    => 0.0,
+            ];
+        }
+
+        $abiertas = 0;
+        $tickets  = [];
+        $total    = 0.0;
+        foreach ($subordenes as $sub) {
+            $estado = mb_strtolower(trim((string) ($sub['suborderStatusDescription'] ?? '')));
+            if ($estado === 'cancelada') {
+                continue;
+            }
+            if ($estado !== 'cerrada') {
+                $abiertas++;
+
+                continue;
+            }
+            // Consumo = total de la suborden (la propina viene aparte en tipPaid y no se incluye)
+            $monto = round((float) ($sub['suborderTotal'] ?? 0), 2);
+            if ($monto <= 0 || empty($sub['suborderId'])) {
+                continue;
+            }
+            $tickets[] = [
+                'numero_ticket' => (string) $sub['suborderId'],
+                'cheque'        => (string) $orden['order_id'],
+                'monto'         => $monto,
+            ];
+            $total += $monto;
+        }
+
+        return ['error' => null, 'abiertas' => $abiertas, 'tickets' => $tickets, 'total' => round($total, 2)];
+    }
+
+    /**
+     * Antes de liberar: exige cuenta cerrada en Xetux y registra su consumo en la auditoría de OR.
+     *
+     * @return array{error: ?string, status: int, enviado: ?array<string, mixed>}
+     */
+    private function enviarConsumoXetux(string $codigo, int $sucursalId): array
+    {
+        $ordenModel = model(ReservaXetuxOrdenModel::class);
+        $orden      = $sucursalId > 0 ? $ordenModel->pendienteDeConsumo($codigo, $sucursalId) : null;
+        if (! $orden || empty($orden['order_id'])) {
+            return ['error' => null, 'status' => 200, 'enviado' => null];
+        }
+
+        $estado = $this->estadoSubordenesXetux($sucursalId, $orden);
+        if ($estado['error'] !== null) {
+            return ['error' => $estado['error'], 'status' => 502, 'enviado' => null];
+        }
+        if ($estado['abiertas'] > 0) {
+            return [
+                'error'   => 'La cuenta sigue abierta en el POS. Ciérrala en Xetux antes de liberar la mesa.',
+                'status'  => 409,
+                'enviado' => null,
+            ];
+        }
+
+        $respuesta = null;
+        if ($estado['tickets'] !== []) {
+            $api       = new ReservasApiService();
+            $respuesta = $api->registrarConsumos($sucursalId, $codigo, $estado['tickets']);
+            if ($respuesta === null) {
+                return [
+                    'error'   => 'No se pudo enviar el consumo a One Reservations: ' . ($api->obtenerUltimoError() ?? 'sin respuesta'),
+                    'status'  => 502,
+                    'enviado' => null,
+                ];
+            }
+        }
+
+        $ordenModel->update($orden['id'], [
+            'estatus'              => 'cerrada',
+            'consumo_total'        => $estado['total'],
+            'consumos_json'        => json_encode(['tickets' => $estado['tickets'], 'respuesta' => $respuesta], JSON_UNESCAPED_UNICODE),
+            'consumos_enviados_at' => date('Y-m-d H:i:s'),
+        ]);
+
+        $numTickets = count($estado['tickets']);
+        (new ReservaActividadService())->registrar(
+            $codigo,
+            'otro',
+            $numTickets === 0
+                ? 'cerró la cuenta en Xetux sin consumo'
+                : 'envió el consumo de Xetux a la auditoría de OR: ' . number_format($estado['total'], 2)
+                    . ' (' . $numTickets . ' ' . ($numTickets === 1 ? 'ticket' : 'tickets') . ')',
+            ['order_id' => $orden['order_id'], 'tickets' => $estado['tickets']],
+            $sucursalId
+        );
+
+        return [
+            'error'   => null,
+            'status'  => 200,
+            'enviado' => ['total' => $estado['total'], 'tickets' => $numTickets],
+        ];
     }
 
     public function agregarTags()
@@ -783,6 +906,14 @@ class ReservasController extends BaseController
             ]);
         }
 
+        // Flujo: primero check-in en One Reservations (estatus 3/4/5), luego sentar
+        if (($reserva['checkin'] ?? '') !== 'Sí') {
+            return $this->response->setStatusCode(422)->setJSON([
+                'success' => false,
+                'error'   => 'La reserva no tiene check-in en One Reservations. Haz el check-in antes de sentar.',
+            ]);
+        }
+
         $xetux = new XetuxApiService();
         $cfg   = $xetux->configuracion($sucursalId);
         if ($cfg === null) {
@@ -949,6 +1080,29 @@ class ReservasController extends BaseController
             ]);
         }
 
+        // Xetux no expone cancelación: la orden se cancela en el POS y aquí solo se confirma.
+        if (! empty($orden['order_id'])) {
+            $estado = $this->estadoSubordenesXetux($sucursalId, $orden);
+            if ($estado['error'] !== null) {
+                return $this->response->setStatusCode(502)->setJSON([
+                    'success' => false,
+                    'error'   => $estado['error'],
+                ]);
+            }
+            if ($estado['abiertas'] > 0) {
+                return $this->response->setStatusCode(409)->setJSON([
+                    'success' => false,
+                    'error'   => 'La orden sigue abierta en el POS. Cancélala en Xetux y vuelve a intentar.',
+                ]);
+            }
+            if ($estado['tickets'] !== []) {
+                return $this->response->setStatusCode(409)->setJSON([
+                    'success' => false,
+                    'error'   => 'La cuenta se cerró con consumo en el POS. Usa «Liberar mesa» para enviarlo a One Reservations.',
+                ]);
+            }
+        }
+
         $ordenModel->update($orden['id'], ['estatus' => 'cancelada']);
 
         $asignacionModel = model(ReservaAsignacionModel::class);
@@ -1014,9 +1168,8 @@ class ReservasController extends BaseController
             default     => 'activa',
         };
 
-        if ($estadoLocal !== 'activa') {
-            model(ReservaXetuxOrdenModel::class)->update($orden['id'], ['estatus' => $estadoLocal]);
-        }
+        // Solo consulta: la orden local se cierra al liberar la mesa (ahí se envía el consumo a OR)
+        // o se cancela con CANCELAR, para no reabrir SENTAR antes de tiempo.
 
         (new ReservaActividadService())->registrar(
             $codigo,

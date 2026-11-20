@@ -232,6 +232,31 @@ class ReservasApiService
     }
 
     /**
+     * Envía tickets de consumo a la auditoría de OR (POST /reservas/consumos).
+     *
+     * @param list<array{numero_ticket: string, cheque: string, monto: float}> $tickets
+     *
+     * @return array<string, mixed>|null data de la respuesta; null si falló (ver obtenerUltimoError()).
+     */
+    public function registrarConsumos(int $sucursalId, string $booking, array $tickets): ?array
+    {
+        $this->ultimoError = null;
+
+        if (! $this->prepararApiKey($sucursalId)) {
+            $this->ultimoError = 'La sucursal no tiene API Key de One Reservations: no se puede enviar el consumo.';
+
+            return null;
+        }
+
+        $respuesta = $this->peticionPost('/reservas/consumos', [
+            'booking' => $booking,
+            'tickets' => $tickets,
+        ]);
+
+        return $respuesta === null ? null : (array) ($respuesta['data'] ?? []);
+    }
+
+    /**
      * @param list<mixed> $lista
      *
      * @return list<array<string, mixed>>
@@ -468,15 +493,35 @@ class ReservasApiService
      */
     private function peticionGet(string $ruta, array $query = []): ?array
     {
-        $cliente = \Config\Services::curlrequest();
+        return $this->peticion('GET', $ruta, ['query' => $query]);
+    }
+
+    /**
+     * @param array<string, mixed> $cuerpo
+     *
+     * @return array<string, mixed>|null
+     */
+    private function peticionPost(string $ruta, array $cuerpo): ?array
+    {
+        return $this->peticion('POST', $ruta, ['json' => $cuerpo]);
+    }
+
+    /**
+     * @param array<string, mixed> $opciones query | json
+     *
+     * @return array<string, mixed>|null
+     */
+    private function peticion(string $metodo, string $ruta, array $opciones): ?array
+    {
+        // Instancia no compartida: la compartida conserva body/headers entre peticiones
+        $cliente = \Config\Services::curlrequest([], null, null, false);
 
         try {
-            $respuesta = $cliente->get($this->baseUrl . $ruta, [
+            $respuesta = $cliente->request($metodo, $this->baseUrl . $ruta, array_merge([
                 'headers'     => $this->headers(),
-                'query'       => $query,
                 'timeout'     => 15,
                 'http_errors' => false,
-            ]);
+            ], $opciones));
 
             $estado = $respuesta->getStatusCode();
             $cuerpo = json_decode($respuesta->getBody(), true);

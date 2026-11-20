@@ -18,12 +18,28 @@ class ReservaXetuxOrdenModel extends Model
         'waiter_id',
         'space_id',
         'estatus',
+        'consumo_total',
+        'consumos_json',
+        'consumos_enviados_at',
         'payload_create_json',
         'payload_response_json',
         'created_at',
         'updated_at',
     ];
     protected $useTimestamps = true;
+
+    /**
+     * Última orden (activa o ya cerrada en el POS) cuyo consumo no se ha enviado a OR.
+     */
+    public function pendienteDeConsumo(string $codigo, int $sucursalId): ?array
+    {
+        return $this->where('reserva_codigo', $codigo)
+            ->where('sucursal_id', $sucursalId)
+            ->whereIn('estatus', ['activa', 'cerrada'])
+            ->where('consumos_enviados_at', null)
+            ->orderBy('id', 'DESC')
+            ->first();
+    }
 
     public function activaPorCodigo(string $codigo, int $sucursalId): ?array
     {

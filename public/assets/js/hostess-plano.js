@@ -757,6 +757,10 @@ var HostessPlano = (function () {
                 }
                 mesaPendiente = null;
                 $('#modalInfoMesaOcupada').modal('hide');
+                if (result.data.consumo && result.data.consumo.tickets > 0) {
+                    alert('Mesa liberada. Consumo enviado a la auditoría de One Reservations: '
+                        + Number(result.data.consumo.total).toFixed(2));
+                }
                 cargarPlano();
             })
             .catch(function () {
