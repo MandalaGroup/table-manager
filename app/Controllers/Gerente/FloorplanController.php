@@ -3,12 +3,11 @@
 namespace App\Controllers\Gerente;
 
 use App\Controllers\BaseController;
-use App\Models\AmbienteModel;
-use App\Models\FloorplanAmbienteModel;
 use App\Models\FloorplanModel;
 use App\Models\MesaModel;
 use App\Models\ReservaAsignacionModel;
 use App\Models\SucursalModel;
+use App\Services\FloorplanAmbientesService;
 use App\Traits\GerenteAccessTrait;
 
 class FloorplanController extends BaseController
@@ -170,10 +169,8 @@ class FloorplanController extends BaseController
 
         $floorplan  = model(FloorplanModel::class)->find($floorplanId);
         $sucursal   = model(SucursalModel::class)->find($floorplan['sucursal_id']);
-        $ambientes  = model(FloorplanAmbienteModel::class)->ambientesDe($floorplanId);
-        if ($ambientes === []) {
-            $ambientes = model(AmbienteModel::class)->listarActivos();
-        }
+        $servicioAmb = new FloorplanAmbientesService();
+        $ambientes  = $servicioAmb->delEditor($floorplan);
         $mesas      = model(MesaModel::class)->porFloorplan($floorplanId);
         $inventario = model(MesaModel::class)->inventarioPorSucursal((int) $floorplan['sucursal_id']);
 
@@ -191,7 +188,34 @@ class FloorplanController extends BaseController
             'mesas'      => $mesas,
             'inventario' => $inventario,
             'aforo'      => model(MesaModel::class)->calcularAforo($floorplanId),
+            'ambientesDisponibles' => $servicioAmb->disponibles($floorplan),
             'modo'       => 'gerente',
+        ]);
+    }
+
+    /**
+     * Botón «+» de la barra de ambientes del editor: liga un ambiente existente
+     * de la sucursal o crea uno nuevo y lo agrega al floorplan.
+     */
+    public function agregarAmbiente(int $floorplanId)
+    {
+        if (! $this->floorplanPermitido($floorplanId)) {
+            return $this->response->setStatusCode(403)->setJSON(['success' => false, 'error' => 'Acceso denegado']);
+        }
+
+        $floorplan  = model(FloorplanModel::class)->find($floorplanId);
+        $ambienteId = (int) $this->request->getPost('ambiente_id');
+        $resultado  = (new FloorplanAmbientesService())->agregar(
+            $floorplan,
+            $ambienteId > 0 ? $ambienteId : null,
+            (string) $this->request->getPost('descripcion')
+        );
+
+        return $this->response->setStatusCode($resultado['status'])->setJSON([
+            'success'  => $resultado['status'] === 200,
+            'error'    => $resultado['error'] ?? null,
+            'ambiente' => $resultado['ambiente'] ?? null,
+            'csrf'     => csrf_hash(),
         ]);
     }
 

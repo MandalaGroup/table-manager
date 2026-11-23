@@ -74,6 +74,7 @@ $routes->group('', ['filter' => 'auth'], static function ($routes) {
         $routes->post('floorplan/(:num)/activar', 'Admin\FloorplanController::activar/$1');
         $routes->post('floorplan/(:num)/desactivar', 'Admin\FloorplanController::desactivar/$1');
         $routes->post('floorplan/(:num)/duplicar', 'Admin\FloorplanController::duplicar/$1');
+        $routes->post('floorplan/(:num)/ambientes', 'Admin\FloorplanController::agregarAmbiente/$1');
 
         $routes->get('usuarios', 'Admin\UsuariosController::index');
         $routes->get('usuarios/modal/crear', 'Admin\UsuariosController::modalCrear');
@@ -103,6 +104,7 @@ $routes->group('', ['filter' => 'auth'], static function ($routes) {
         $routes->post('floorplan/(:num)/guardar', 'Gerente\FloorplanController::guardar/$1');
         $routes->post('floorplan/(:num)/activar', 'Gerente\FloorplanController::activar/$1');
         $routes->post('floorplan/(:num)/desactivar', 'Gerente\FloorplanController::desactivar/$1');
+        $routes->post('floorplan/(:num)/ambientes', 'Gerente\FloorplanController::agregarAmbiente/$1');
         $routes->post('floorplan/mesas/(:num)', 'Gerente\FloorplanController::actualizarMesa/$1');
         $routes->get('floorplan/mesas/(:num)/reservas', 'Gerente\FloorplanController::reservasMesa/$1');
     });

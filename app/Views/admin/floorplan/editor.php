@@ -179,7 +179,22 @@ $volverUrl = $modo === 'admin'
             <?php foreach ($ambientes as $i => $a): ?>
             <button type="button" class="fp-amb-btn <?= $i === 0 ? 'active' : '' ?>" data-ambiente="<?= $a['id'] ?>"><?= esc(strtoupper($a['descripcion'])) ?></button>
             <?php endforeach; ?>
-            <button type="button" class="fp-amb-btn fp-amb-add">+</button>
+            <button type="button" class="fp-amb-btn fp-amb-add" id="btnAmbienteAdd"
+                    title="Agregar ambiente" aria-label="Agregar ambiente" aria-haspopup="dialog" aria-expanded="false">+</button>
+        </div>
+
+        <!-- Popover del «+»: ligar un ambiente de la sucursal o crear uno nuevo -->
+        <div class="fp-amb-pop" id="fpAmbPop" role="dialog" aria-label="Agregar ambiente" hidden>
+            <div class="fp-amb-pop-title">Agregar ambiente</div>
+            <div class="fp-amb-pop-list" id="fpAmbPopList"></div>
+            <form class="fp-amb-pop-form" id="fpAmbPopForm" autocomplete="off">
+                <label for="fpAmbNuevo">Nuevo ambiente</label>
+                <div class="fp-amb-pop-row">
+                    <input type="text" id="fpAmbNuevo" maxlength="150" placeholder="Ej. TERRAZA">
+                    <button type="submit" class="fp-amb-pop-submit">Crear</button>
+                </div>
+            </form>
+            <div class="fp-amb-pop-error" id="fpAmbPopError" hidden></div>
         </div>
 
         <div class="fp-aforo-badge">Aforo: <strong id="aforoValue"><?= (int) $aforo ?></strong></div>
@@ -275,6 +290,8 @@ $volverUrl = $modo === 'admin'
         mesas: <?= json_encode($mesas, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT) ?>,
         inventario: <?= json_encode($inventario ?? [], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT) ?>,
         ambientes: <?= json_encode($ambientes, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT) ?>,
+        ambientesDisponibles: <?= json_encode($ambientesDisponibles ?? [], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT) ?>,
+        ambientesUrl: '<?= $modo === 'gerente' ? base_url("gerente/floorplan/{$floorplan['id']}/ambientes") : base_url("admin/floorplan/{$floorplan['id']}/ambientes") ?>',
         csrfToken: '<?= csrf_hash() ?>',
         csrfHeader: '<?= config('Security')->headerName ?>',
         gerenteMode: <?= $modo === 'gerente' ? 'true' : 'false' ?>,

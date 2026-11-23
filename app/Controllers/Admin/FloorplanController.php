@@ -8,6 +8,7 @@ use App\Models\FloorplanAmbienteModel;
 use App\Models\FloorplanModel;
 use App\Models\MesaModel;
 use App\Models\SucursalModel;
+use App\Services\FloorplanAmbientesService;
 
 class FloorplanController extends BaseController
 {
@@ -66,7 +67,7 @@ class FloorplanController extends BaseController
         }
 
         $sucursal   = model(SucursalModel::class)->find($floorplan['sucursal_id']);
-        $ambientes  = $this->ambientesDelFloorplan($floorplan);
+        $ambientes  = (new FloorplanAmbientesService())->delEditor($floorplan);
         $mesas      = model(MesaModel::class)->porFloorplan($floorplanId);
         $inventario = model(MesaModel::class)->inventarioPorSucursal((int) $floorplan['sucursal_id']);
         $aforo      = model(MesaModel::class)->calcularAforo($floorplanId);
@@ -86,6 +87,7 @@ class FloorplanController extends BaseController
             'mesas'      => $mesas,
             'inventario' => $inventario,
             'aforo'      => $aforo,
+            'ambientesDisponibles' => (new FloorplanAmbientesService())->disponibles($floorplan),
             'modo'       => 'admin',
             'autoPrint'  => $this->request->getGet('print') === '1',
         ]);
@@ -128,28 +130,30 @@ class FloorplanController extends BaseController
     }
 
     /**
-     * Ambientes que contiene el floorplan. Usa la tabla puente; si está vacía
-     * (floorplans antiguos) cae al ambiente_id único o a los activos.
+     * Botón «+» de la barra de ambientes del editor: liga un ambiente existente
+     * de la sucursal o crea uno nuevo y lo agrega al floorplan.
      */
-    private function ambientesDelFloorplan(array $floorplan): array
+    public function agregarAmbiente(int $floorplanId)
     {
-        $ambientes = model(FloorplanAmbienteModel::class)->ambientesDe((int) $floorplan['id']);
+        $floorplan = model(FloorplanModel::class)->find($floorplanId);
 
-        if ($ambientes !== []) {
-            return $ambientes;
+        if (! $floorplan) {
+            return $this->response->setStatusCode(404)->setJSON(['success' => false, 'error' => 'FloorPlan no encontrado.']);
         }
 
-        if (! empty($floorplan['ambiente_id'])) {
-            $uno = model(AmbienteModel::class)
-                ->select('id, descripcion')
-                ->find((int) $floorplan['ambiente_id']);
+        $ambienteId = (int) $this->request->getPost('ambiente_id');
+        $resultado  = (new FloorplanAmbientesService())->agregar(
+            $floorplan,
+            $ambienteId > 0 ? $ambienteId : null,
+            (string) $this->request->getPost('descripcion')
+        );
 
-            if ($uno) {
-                return [$uno];
-            }
-        }
-
-        return model(AmbienteModel::class)->listarActivos();
+        return $this->response->setStatusCode($resultado['status'])->setJSON([
+            'success'  => $resultado['status'] === 200,
+            'error'    => $resultado['error'] ?? null,
+            'ambiente' => $resultado['ambiente'] ?? null,
+            'csrf'     => csrf_hash(),
+        ]);
     }
 
     public function crear(int $sucursalId)

@@ -4,7 +4,7 @@
 (function () {
     'use strict';
 
-    var EDITOR_BUILD = 'B22-pan-hand';
+    var EDITOR_BUILD = 'B23-ambientes';
 
     var canvas, history = [], historyIndex = -1;
     var tableCounter = 100;
@@ -19,6 +19,8 @@
     var herramientaActiva = 'select';
     var panActivo = false;
     var panInicio = null;
+    var ambienteActivo = null;
+    var OPACIDAD_ATENUADA = 0.3;
 
     // Módulo común de estructuras: todos los SVG usan un viewBox de 48 unidades,
     // así que al escalar 1 unidad = UNIDAD_ESTRUCTURA px todas las piezas
@@ -54,6 +56,7 @@
         renderStructural();
         bindGerentePanel();
         bindDetalles();
+        bindAmbientes();
         applyZoom(parseFloat(document.getElementById('zoomSelect').value));
 
         console.log('[FloorPlan] editor build:', EDITOR_BUILD);
@@ -85,6 +88,7 @@
                     if (!esEtiqueta) { aclararImagenEstructura(obj); }
                 }
             });
+            aplicarAtenuado();
             canvas.renderAll();
             saveHistory();
             refreshTableList();
@@ -455,6 +459,213 @@
         el.textContent = Math.round((canvas.getZoom() || 1) * 100) + '%';
     }
 
+    /* ------------------------------------------------------------------
+     * Ambientes (barra inferior derecha): pestañas y botón «+».
+     * La pestaña activa atenúa las mesas de los otros ambientes del
+     * floorplan y define el ambiente de las mesas nuevas. El atenuado es
+     * solo visual: serializarCanvas() lo quita antes de guardar.
+     * ------------------------------------------------------------------ */
+
+    function serializarCanvas() {
+        var atenuadas = [];
+        canvas.getObjects().forEach(function (obj) {
+            if (obj._fpAtenuada) {
+                atenuadas.push(obj);
+                obj.opacity = 1;
+            }
+        });
+        var json = canvas.toJSON(['objectType', 'mesaData', 'structuralType']);
+        atenuadas.forEach(function (obj) { obj.opacity = OPACIDAD_ATENUADA; });
+        return json;
+    }
+
+    function idsAmbientesFloorplan() {
+        return (FLOORPLAN.ambientes || []).map(function (a) { return parseInt(a.id, 10); });
+    }
+
+    function aplicarAtenuado() {
+        if (!canvas) return;
+        var ids = idsAmbientesFloorplan();
+        var filtrar = ambienteActivo && ids.length > 1;
+
+        canvas.getObjects().forEach(function (obj) {
+            if (!obj.mesaData) return;
+            var amb = parseInt(obj.mesaData.ambiente_id, 10);
+            // Solo se atenúan mesas de otro ambiente que sí está en este floorplan;
+            // las que traen un ambiente ajeno se dejan visibles para no ocultarlas.
+            var atenuar = filtrar && amb !== ambienteActivo && ids.indexOf(amb) !== -1;
+            if (atenuar) {
+                obj._fpAtenuada = true;
+                obj.opacity = OPACIDAD_ATENUADA;
+            } else if (obj._fpAtenuada) {
+                obj._fpAtenuada = false;
+                obj.opacity = 1;
+            }
+        });
+    }
+
+    function activarAmbiente(id) {
+        ambienteActivo = parseInt(id, 10) || null;
+        document.querySelectorAll('.fp-ambiente-toggle .fp-amb-btn[data-ambiente]').forEach(function (b) {
+            b.classList.toggle('active', parseInt(b.dataset.ambiente, 10) === ambienteActivo);
+        });
+        aplicarAtenuado();
+        canvas.renderAll();
+    }
+
+    function bindAmbientes() {
+        var barra = document.querySelector('.fp-ambiente-toggle');
+        var btnAdd = document.getElementById('btnAmbienteAdd');
+        var pop = document.getElementById('fpAmbPop');
+        if (!barra) return;
+
+        var primero = barra.querySelector('.fp-amb-btn[data-ambiente]');
+        ambienteActivo = primero ? parseInt(primero.dataset.ambiente, 10) : null;
+
+        barra.addEventListener('click', function (e) {
+            var tab = e.target.closest('.fp-amb-btn[data-ambiente]');
+            if (tab) activarAmbiente(tab.dataset.ambiente);
+        });
+
+        if (!btnAdd || !pop || !FLOORPLAN.ambientesUrl) return;
+
+        var lista = document.getElementById('fpAmbPopList');
+        var form = document.getElementById('fpAmbPopForm');
+        var input = document.getElementById('fpAmbNuevo');
+        var errorEl = document.getElementById('fpAmbPopError');
+        var enviando = false;
+
+        function mostrarError(msg) {
+            errorEl.textContent = msg || '';
+            errorEl.hidden = !msg;
+        }
+
+        function pintarLista() {
+            lista.innerHTML = '';
+            (FLOORPLAN.ambientesDisponibles || []).forEach(function (a) {
+                var b = document.createElement('button');
+                b.type = 'button';
+                b.className = 'fp-amb-pop-item';
+                b.dataset.id = a.id;
+                b.textContent = String(a.descripcion).toUpperCase();
+                lista.appendChild(b);
+            });
+        }
+
+        function abrir() {
+            pintarLista();
+            mostrarError('');
+            input.value = '';
+            pop.hidden = false;
+            btnAdd.setAttribute('aria-expanded', 'true');
+            var primerItem = lista.querySelector('.fp-amb-pop-item');
+            (primerItem || input).focus();
+        }
+
+        function cerrar() {
+            pop.hidden = true;
+            btnAdd.setAttribute('aria-expanded', 'false');
+        }
+
+        btnAdd.addEventListener('click', function (e) {
+            e.stopPropagation();
+            if (pop.hidden) { abrir(); } else { cerrar(); }
+        });
+
+        document.addEventListener('click', function (e) {
+            if (!pop.hidden && !pop.contains(e.target) && e.target !== btnAdd) cerrar();
+        });
+
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape' && !pop.hidden) {
+                cerrar();
+                btnAdd.focus();
+            }
+        });
+
+        lista.addEventListener('click', function (e) {
+            var item = e.target.closest('.fp-amb-pop-item');
+            if (item) enviar({ ambiente_id: item.dataset.id });
+        });
+
+        form.addEventListener('submit', function (e) {
+            e.preventDefault();
+            var nombre = input.value.trim();
+            if (nombre.length < 2) {
+                mostrarError('Escribe un nombre de al menos 2 caracteres.');
+                input.focus();
+                return;
+            }
+            enviar({ descripcion: nombre });
+        });
+
+        function bloquear(si) {
+            enviando = si;
+            pop.querySelectorAll('button, input').forEach(function (el) { el.disabled = si; });
+        }
+
+        function enviar(datos) {
+            if (enviando) return;
+            mostrarError('');
+            bloquear(true);
+
+            var fd = new FormData();
+            Object.keys(datos).forEach(function (k) { fd.append(k, datos[k]); });
+
+            var headers = { 'X-Requested-With': 'XMLHttpRequest' };
+            headers[FLOORPLAN.csrfHeader] = FLOORPLAN.csrfToken;
+
+            fetch(FLOORPLAN.ambientesUrl, { method: 'POST', headers: headers, body: fd })
+                .then(function (r) {
+                    return r.json().catch(function () { return {}; }).then(function (data) {
+                        return { ok: r.ok, data: data };
+                    });
+                })
+                .then(function (res) {
+                    if (res.data && res.data.csrf) FLOORPLAN.csrfToken = res.data.csrf;
+                    if (!res.ok || !res.data.success || !res.data.ambiente) {
+                        mostrarError((res.data && res.data.error) || 'No se pudo agregar el ambiente.');
+                        return;
+                    }
+                    agregarAmbienteUI(res.data.ambiente);
+                    cerrar();
+                })
+                .catch(function () {
+                    mostrarError('Error de conexión.');
+                })
+                .finally(function () {
+                    bloquear(false);
+                });
+        }
+
+        function agregarAmbienteUI(amb) {
+            var id = parseInt(amb.id, 10);
+            var etiqueta = String(amb.descripcion).toUpperCase();
+
+            FLOORPLAN.ambientes.push({ id: id, descripcion: amb.descripcion });
+            FLOORPLAN.ambientesDisponibles = (FLOORPLAN.ambientesDisponibles || []).filter(function (a) {
+                return parseInt(a.id, 10) !== id;
+            });
+
+            var tab = document.createElement('button');
+            tab.type = 'button';
+            tab.className = 'fp-amb-btn';
+            tab.dataset.ambiente = id;
+            tab.textContent = etiqueta;
+            barra.insertBefore(tab, btnAdd);
+
+            var select = document.getElementById('detAmbiente');
+            if (select) {
+                var opt = document.createElement('option');
+                opt.value = id;
+                opt.textContent = etiqueta;
+                select.appendChild(opt);
+            }
+
+            activarAmbiente(id);
+        }
+    }
+
     function bindGerentePanel() {
         if (!FLOORPLAN.gerenteMode) return;
 
@@ -629,6 +840,8 @@
             amb.addEventListener('change', function () {
                 if (!detallesObj) return;
                 detallesObj.mesaData.ambiente_id = parseInt(amb.value, 10);
+                aplicarAtenuado();
+                canvas.renderAll();
                 autoGuardar();
             });
         }
@@ -918,7 +1131,8 @@
     function addTablePreset(preset) {
         tableCounter += 1;
         var numero = String(tableCounter);
-        var ambienteId = FLOORPLAN.ambientes[0] ? FLOORPLAN.ambientes[0].id : 1;
+        var ambienteId = ambienteActivo
+            || (FLOORPLAN.ambientes[0] ? FLOORPLAN.ambientes[0].id : 1);
         var fabricId = 'fab_' + Date.now() + '_' + tableCounter;
 
         var group = FP_TABLE_PRESETS.buildFabricGroup(preset, numero, ambienteId, fabricId);
@@ -1300,6 +1514,7 @@
         var seats = parseInt(mesa.maximo, 10) || 2;
         var minimo = parseInt(mesa.minimo, 10) || 1;
         var ambienteId = parseInt(mesa.ambiente_id, 10)
+            || ambienteActivo
             || (FLOORPLAN.ambientes[0] ? FLOORPLAN.ambientes[0].id : 1);
         var fabricId = mesa.fabric_id || ('fab_' + Date.now() + '_' + (mesa.id || tableCounter));
 
@@ -1393,7 +1608,7 @@
         var payload;
         try {
             payload = {
-                canvas: canvas.toJSON(['objectType', 'mesaData', 'structuralType']),
+                canvas: serializarCanvas(),
                 mesas: collectMesas(),
                 mesas_desvinculadas: desvinculadasEnviadas,
                 build: EDITOR_BUILD
@@ -1467,7 +1682,7 @@
     }
 
     function saveHistory() {
-        var json = JSON.stringify(canvas.toJSON(['objectType', 'mesaData', 'structuralType']));
+        var json = JSON.stringify(serializarCanvas());
         history = history.slice(0, historyIndex + 1);
         history.push(json);
         historyIndex = history.length - 1;
@@ -1485,6 +1700,7 @@
         canvas.loadFromJSON(history[historyIndex], function () {
             vincularMesasBd();
             restaurarMesasTrasCarga();
+            aplicarAtenuado();
             canvas.renderAll();
             refreshTableList();
         });
@@ -1496,6 +1712,7 @@
         canvas.loadFromJSON(history[historyIndex], function () {
             vincularMesasBd();
             restaurarMesasTrasCarga();
+            aplicarAtenuado();
             canvas.renderAll();
             refreshTableList();
         });

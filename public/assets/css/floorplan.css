@@ -678,6 +678,126 @@
     font-size: 1rem;
 }
 
+.fp-amb-add:hover,
+.fp-amb-add[aria-expanded="true"] {
+    color: var(--fp-text);
+    background: var(--fp-surface-2);
+}
+
+.fp-amb-btn:not(.fp-amb-add):hover {
+    color: var(--fp-text);
+}
+
+/* Popover del «+» de ambientes */
+.fp-amb-pop {
+    position: fixed;
+    bottom: 76px;
+    right: 24px;
+    width: 260px;
+    max-width: calc(100vw - 32px);
+    background: var(--fp-surface);
+    border: 1px solid var(--fp-border);
+    border-radius: 12px;
+    padding: 12px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+    z-index: 6;
+    color: var(--fp-text);
+}
+
+.fp-amb-pop[hidden] {
+    display: none;
+}
+
+.fp-amb-pop-title {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--fp-text-muted);
+    margin-bottom: 8px;
+}
+
+.fp-amb-pop-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 200px;
+    overflow-y: auto;
+    margin-bottom: 10px;
+}
+
+.fp-amb-pop-list:empty {
+    display: none;
+}
+
+.fp-amb-pop-item {
+    text-align: left;
+    background: var(--fp-surface-2);
+    border: 1px solid transparent;
+    color: var(--fp-text);
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-size: 0.8125rem;
+    cursor: pointer;
+}
+
+.fp-amb-pop-item:hover,
+.fp-amb-pop-item:focus-visible {
+    border-color: var(--fp-accent);
+    outline: none;
+}
+
+.fp-amb-pop-form label {
+    display: block;
+    font-size: 0.75rem;
+    color: var(--fp-text-muted);
+    margin-bottom: 4px;
+}
+
+.fp-amb-pop-row {
+    display: flex;
+    gap: 6px;
+}
+
+.fp-amb-pop-row input {
+    flex: 1;
+    min-width: 0;
+    background: var(--fp-bg);
+    border: 1px solid var(--fp-border);
+    border-radius: 8px;
+    color: var(--fp-text);
+    padding: 7px 10px;
+    font-size: 0.8125rem;
+}
+
+.fp-amb-pop-row input:focus {
+    outline: none;
+    border-color: var(--fp-accent);
+}
+
+.fp-amb-pop-submit {
+    background: var(--fp-accent);
+    border: none;
+    color: #fff;
+    border-radius: 8px;
+    padding: 7px 12px;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.fp-amb-pop-submit:disabled,
+.fp-amb-pop-item:disabled {
+    opacity: 0.5;
+    cursor: wait;
+}
+
+.fp-amb-pop-error {
+    margin-top: 8px;
+    font-size: 0.75rem;
+    color: #ff6961;
+}
+
 /* Panel gerente en sidebar */
 .fp-hint-gerente {
     background: rgba(10, 132, 255, 0.12);
@@ -1145,4 +1265,8 @@
     position: absolute;
     bottom: 24px;
     right: 24px;
+}
+
+.fp-embed .fp-amb-pop {
+    position: absolute;
 }
